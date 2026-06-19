@@ -1,128 +1,129 @@
-# Prerequisites
-*.d
+# ============================================================
+# OS & Editor
+# ============================================================
+.DS_Store
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
 
-# Compiled Object files
-*.slo
-*.lo
+# ============================================================
+# Compiled Objects & Intermediate Files
+# ============================================================
 *.o
 *.obj
-
-# Precompiled Headers
+*.slo
+*.lo
+*.d
+*.dwo
 *.gch
 *.pch
 
-# Linker files
-*.ilk
-
-# Debugger Files
-*.pdb
-
-# Compiled Dynamic libraries
+# ============================================================
+# Libraries
+# ============================================================
+*.a
+*.la
+*.lai
+*.lib
 *.so
+*.so.*
 *.dylib
 *.dll
-*.so.*
 
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
+# ============================================================
+# Executables & Binaries
+# ============================================================
 *.exe
 *.out
 *.app
-
-# Build directories
-build/
-Build/
-build-*/
-
-# CMake generated files
-CMakeFiles/
-CMakeCache.txt
-cmake_install.cmake
-Makefile
-install_manifest.txt
-compile_commands.json
-
-# Temporary files
-*.tmp
-*.log
-*.bak
-*.swp
-
-# vcpkg
-vcpkg_installed/
-
-# debug information files
-*.dwo
-
-# test output & cache
-Testing/
-.cache/
-
-
-# Dear ImGui Specific
-
-imgui.ini
-
-imgui.log
-
-
-build/
-bin/
-obj/
-*.o
-*.obj
-*.exe
-*.out
 *.out.js
 *.out.wasm
 
+# ============================================================
+# Linker & Debugger
+# ============================================================
+*.ilk
+*.pdb
+*.idb
+*.iobj
+*.ipdb
+*.pgc
+*.pgd
 
+# ============================================================
+# MSVC / Visual Studio
+# ============================================================
+*.sdf
+*.suo
+*.user
+*.aps
+*.sbresource
+*.VC.db
+*.VC.VC.opendb
 .vs/
 Debug/
 Release/
 x64/
 x86/
 ARM/
-*.sdf
-*.suo
-*.user
-*.aps
-*.local
-*.pgc
-*.pgd
-*.sbresource
-*.idb
-*.ilk
-*.pdb
-*.iobj
-*.ipdb
-*.log
-*.VC.db
-*.VC.VC.opendb
 
-
+# ============================================================
+# CMake
+# ============================================================
 CMakeCache.txt
 CMakeFiles/
 CMakeScripts/
-Testing/
-Makefile
 cmake_install.cmake
 install_manifest.txt
 compile_commands.json
+Makefile
+
+# ============================================================
+# Build & Output Directories
+# ============================================================
+build/
+Build/
+build-*/
+bin/
+obj/
+Testing/
+.cache/
+
+# ============================================================
+# Fortran
+# ============================================================
+*.mod
+*.smod
+
+# ============================================================
+# Dear ImGui
+# ============================================================
+imgui.ini
+imgui.log
+
+# ============================================================
+# Temporary & Misc
+# ============================================================
+*.tmp
+*.log
+*.bak
+*.swp
+*.local
+
+# ============================================================
+# vcpkg
+# ============================================================
+vcpkg_installed/
+
+# ============================================================
+# Third-party vendored dependencies
+# ============================================================
+imgui/
+ImGuiFileDialog/
 
 
-.DS_Store
-.idea/
-.vscode/
-*.sublime-project
-*.sublime-workspace
+# ============================================================
+# Testing Files
+# ============================================================
+Examples/
