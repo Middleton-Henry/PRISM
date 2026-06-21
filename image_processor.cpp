@@ -9,18 +9,32 @@
 #include <chrono>
 #include <GLFW/glfw3.h>
 #include <numeric>
+#include <unordered_set>
 
+#ifndef GL_TEXTURE_MAX_ANISOTROPY_EXT
+#define GL_TEXTURE_MAX_ANISOTROPY_EXT 0x84FE
+#endif
+
+//organizes and parses image data
 class ImageProcessor{
     public:
+    struct RGBA {
+        uint8_t r = 0;
+        uint8_t g = 0;
+        uint8_t b = 0;
+        uint8_t a = 0;
+    };
+
     struct ImageTraits {
         uint16_t width = 0;
         uint16_t height = 0;
         uint32_t uniqueColors = 0;
     };
-
+    /*
     struct ImageStructure {
-        std::unordered_map<std::string, int> colorFrequency;
+        std::unordered_map<uint32_t, int> colorFrequency;
     };
+    */
 
     struct MetaData {
         std::string name;
@@ -28,55 +42,80 @@ class ImageProcessor{
         std::filesystem::file_time_type dateLastModified;
         uint32_t uploadIndex = 0;
         uint32_t size = 0; //file size
-        //std::vector<unsigned char> imageThumbnail; //keep at very low resolution for ui display
         GLuint thumbnailTextureID = 0;
     };
 
     struct FullImageData {
         ImageTraits imageTraits; //low cost information for basic analysis
-        ImageStructure imageStructure; //high cost information for operations
         MetaData metaData; //information for non operational needs
-    };
-
-    struct AnalysisImageData{
-        ImageTraits imageTraits; //low cost information for basic analysis
-        MetaData metaData; //information for non operational needs
-    };
-
-    struct ComputationalImageData{
-        ImageTraits imageTraits; //low cost information for basic analysis
-        ImageStructure imageStructure; //high cost information for operations
     };
 
     std::vector<FullImageData> imageDataArray;
     std::vector<cv::Mat> imageArray;
     uint32_t uploadIndex = 0; 
 
-    enum SortingSystems{
+    enum ImageSortingSystems{
         UPLOAD_ORDER,
         NAME,
         DATE_MODIFIED,
         DATE_CREATED
     };
 
-    enum InterpolationModes{
-        NEAREST_NEIGHBOR,
-        BILINEAR,
-        CUBIC
-    };
-
-    enum PaletteSortingSolvers{
-        HUNGARIAN,
-        AUCTION,
-        NEAREST_NEIGHBOR_SNAPPING
-    };
-
     FullImageData processImage(const cv::Mat& image) {
         FullImageData imageData;
         imageData.imageTraits.width  = static_cast<uint16_t>(image.cols);
         imageData.imageTraits.height = static_cast<uint16_t>(image.rows);
+        imageData.imageTraits.uniqueColors = countUniqueColors(image);
         return imageData;
     }
+
+    uint32_t packRGBA(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+        if(a == 0) return 0; //rgb is unimportant and a is 0
+        return (uint32_t(a) << 24) | (uint32_t(r) << 16) | (uint32_t(g) << 8) | uint32_t(b);
+    }
+
+    RGBA unpackRGBA(uint32_t packed) {
+        return {
+            static_cast<uint8_t>((packed >> 16) & 0xFF),  // r
+            static_cast<uint8_t>((packed >>  8) & 0xFF),  // g
+            static_cast<uint8_t>( packed        & 0xFF),  // b
+            static_cast<uint8_t>((packed >> 24) & 0xFF)   // a
+        };
+    }
+
+    
+
+    uint32_t countUniqueColors(const cv::Mat& image) {
+        if (image.empty())
+            throw std::runtime_error("Image is empty");
+
+        cv::Mat img4;
+        if (image.channels() == 4)
+            img4 = image;
+        else if (image.channels() == 3)
+            cv::cvtColor(image, img4, cv::COLOR_BGR2BGRA);
+        else if (image.channels() == 1)
+            cv::cvtColor(image, img4, cv::COLOR_GRAY2BGRA);
+
+        std::unordered_set<uint32_t> seen;
+        seen.reserve(img4.rows * img4.cols);
+
+        for (int y = 0; y < img4.rows; ++y) {
+            const uint8_t* row = img4.ptr<uint8_t>(y);
+            for (int x = 0; x < img4.cols; ++x) {
+                uint8_t b = row[x * 4 + 0], g = row[x * 4 + 1];
+                uint8_t r = row[x * 4 + 2], a = row[x * 4 + 3];
+                seen.insert(packRGBA(r, g, b, a));
+            }
+        }
+
+        return static_cast<uint32_t>(seen.size());
+    }
+
+    
+
+
+
 
     void initImageDataArray(int imageCount) {
         if (imageCount < 0) throw std::invalid_argument("imageCount must be non-negative");
@@ -91,7 +130,7 @@ class ImageProcessor{
         if (index < 0 || index >= static_cast<int>(imageDataArray.size()))
             throw std::out_of_range("Index out of range");
 
-        cv::Mat image = cv::imread(std::string(filePath), cv::IMREAD_COLOR);
+        cv::Mat image = cv::imread(std::string(filePath), cv::IMREAD_UNCHANGED); // preserves alpha
         if (image.empty())
             throw std::runtime_error("Failed to load image: " + std::string(filePath));
 
@@ -99,14 +138,13 @@ class ImageProcessor{
         fs::path path(filePath);
 
         imageDataArray[index] = processImage(image);
-        imageDataArray[index].metaData.name           = path.filename().string();
-        imageDataArray[index].metaData.dateLastModified    = fs::last_write_time(path);
-        imageDataArray[index].metaData.dateCreated    = fs::last_write_time(path);
+        imageDataArray[index].metaData.name              = path.filename().string();
+        imageDataArray[index].metaData.dateLastModified  = fs::last_write_time(path);
+        imageDataArray[index].metaData.dateCreated       = fs::last_write_time(path);
 
         std::error_code ec;
         imageDataArray[index].metaData.size = std::filesystem::file_size(filePath, ec);
-        
-        //imageDataArray[index].metaData.imageThumbnail = createThumbnail(image);
+
         std::vector<unsigned char> imageThumbnail = createThumbnail(image);
         imageDataArray[index].metaData.thumbnailTextureID = uploadThumbnail(imageThumbnail);
         imageArray[index] = image.clone();
@@ -128,7 +166,7 @@ class ImageProcessor{
         cv::resize(image, thumbnail, cv::Size(width, height), 0, 0, cv::INTER_AREA);
 
         std::vector<unsigned char> buffer;
-        cv::imencode(".jpg", thumbnail, buffer);
+        cv::imencode(".png", thumbnail, buffer); // PNG supports alpha, JPEG does not
         return buffer;
     }
 
@@ -178,7 +216,7 @@ class ImageProcessor{
         imageArray[toIndex]     = std::move(movingImage);
     }
 
-    void resortImages(SortingSystems sortOrder) {
+    void resortImages(ImageSortingSystems sortOrder) {
         // Build an index array and sort it according to the chosen criterion
         std::vector<int> indices(imageDataArray.size());
         std::iota(indices.begin(), indices.end(), 0);
@@ -228,21 +266,144 @@ class ImageProcessor{
         return (uint64_t)1 << static_cast<unsigned int>(indexBitDepth);
     }
 
-    GLuint uploadThumbnail(const std::vector<unsigned char>& jpegBytes) {
-        cv::Mat img = cv::imdecode(jpegBytes, cv::IMREAD_COLOR);
+    bool hasTransparency(int index){
+        return hasTransparency(imageArray[index]);
+    }
+
+    bool hasTransparency(const cv::Mat& image) {
+        if (image.empty())
+            throw std::runtime_error("Image is empty");
+
+        cv::Mat img4;
+        if (image.channels() == 4)
+            img4 = image;
+        else if (image.channels() == 3)
+            cv::cvtColor(image, img4, cv::COLOR_BGR2BGRA);
+        else if (image.channels() == 1)
+            cv::cvtColor(image, img4, cv::COLOR_GRAY2BGRA);
+        else
+            return false;
+
+        for (int y = 0; y < img4.rows; ++y) {
+            const uint8_t* row = img4.ptr<uint8_t>(y);
+
+            for (int x = 0; x < img4.cols; ++x) {
+                if (row[x * 4 + 3] != 255) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    std::string formatFileSize(uint32_t bytes) {
+        if (bytes < 1024)
+            return std::to_string(bytes) + " B";
+        else if (bytes < 1024 * 1024)
+            return std::to_string(bytes / 1024) + " KB";
+        else
+            return std::to_string(bytes / (1024 * 1024)) + " MB";
+    }
+
+    GLuint uploadThumbnail(const std::vector<unsigned char>& pngBytes) {
+        cv::Mat img = cv::imdecode(pngBytes, cv::IMREAD_UNCHANGED); // preserve alpha on decode too
         if (img.empty()) return 0;
 
-        cv::cvtColor(img, img, cv::COLOR_BGR2RGBA);  // OpenGL expects RGBA
+        if (img.channels() == 4)
+            cv::cvtColor(img, img, cv::COLOR_BGRA2RGBA);
+        else if (img.channels() == 3)
+            cv::cvtColor(img, img, cv::COLOR_BGR2RGBA);
+        else if (img.channels() == 1)
+            cv::cvtColor(img, img, cv::COLOR_GRAY2RGBA);
 
         GLuint texID = 0;
         glGenTextures(1, &texID);
         glBindTexture(GL_TEXTURE_2D, texID);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 1.0f);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
                     img.cols, img.rows, 0,
                     GL_RGBA, GL_UNSIGNED_BYTE, img.data);
         return texID;
+    }
+
+    GLuint uploadFullImage(const cv::Mat& image) {
+        cv::Mat img;
+
+        if (image.channels() == 4)
+            cv::cvtColor(image, img, cv::COLOR_BGRA2RGBA);
+        else if (image.channels() == 3)
+            cv::cvtColor(image, img, cv::COLOR_BGR2RGBA);
+        else if (image.channels() == 1)
+            cv::cvtColor(image, img, cv::COLOR_GRAY2RGBA);
+        else
+            img = image.clone();
+
+        GLuint texID = 0;
+        glGenTextures(1, &texID);
+        glBindTexture(GL_TEXTURE_2D, texID);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 1.0f);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
+                    img.cols, img.rows, 0,
+                    GL_RGBA, GL_UNSIGNED_BYTE, img.data);
+        return texID;
+    }
+
+    GLuint createCheckerboardTexture(int tileSize = 16, int tiles = 4) {
+        int size = tileSize * tiles * 2; // total texture size
+        std::vector<unsigned char> pixels(size * size * 3);
+        for (int y = 0; y < size; y++) {
+            for (int x = 0; x < size; x++) {
+                bool light = ((x / tileSize) + (y / tileSize)) % 2 == 0;
+                unsigned char val = light ? 204 : 128;
+                int idx = (y * size + x) * 3;
+                pixels[idx] = pixels[idx+1] = pixels[idx+2] = val;
+            }
+        }
+        GLuint texID = 0;
+        glGenTextures(1, &texID);
+        glBindTexture(GL_TEXTURE_2D, texID);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 1.0f);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, size, size, 0, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+        return texID;
+    }
+
+    //return the highest unique color count
+    FullImageData getMaxUniqueColors(){
+        if (imageDataArray.empty()) throw std::runtime_error("No images loaded");
+
+        uint32_t highestColorCount = 0;
+        FullImageData highestImageCount; 
+        for (const auto& imageData : imageDataArray) {
+            if(imageData.imageTraits.uniqueColors > highestColorCount){
+                highestImageCount = FullImageData{imageData.imageTraits,imageData.metaData};
+                highestColorCount = imageData.imageTraits.uniqueColors;
+            }
+        }
+        return highestImageCount;
+    }
+
+    int calcRequiredBitDepth(uint32_t uniqueColors) {
+        if (uniqueColors <= 1)
+            return 1;
+
+        int bits = 0;
+        uint32_t value = uniqueColors - 1;
+
+        while (value > 0) {
+            ++bits;
+            value >>= 1;
+        }
+
+        return bits;
     }
 
     
