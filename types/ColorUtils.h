@@ -1,7 +1,7 @@
 #pragma once
 #include <cmath>
 #include <cstdint>
-#include "../types/DataTypes.cpp"
+#include "../types/DataTypes.h"
 
 namespace ColorUtils {
 

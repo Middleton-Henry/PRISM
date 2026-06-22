@@ -1,5 +1,5 @@
 #pragma once
-#include "../types/DataTypes.cpp"
+#include "../types/DataTypes.h"
 #include <array>
 #include <vector>
 #include <opencv2/core.hpp>
@@ -9,7 +9,16 @@
 class ImageAdjuster{
     public:
 
-    void resizeImages(const std::vector<cv::Mat>& frames, uint32_t width, uint32_t height, DataTypes::InterpolationModes interpolationMode = DataTypes::BILINEAR, std::function<void(float, std::string)> onProgress  = nullptr) {
+    void replaceAlpha(const std::vector<cv::Mat>& frames, std::array<float, 3> alphaReplacement, std::vector<DataTypes::EncodingProgress>* encodeProgressList = nullptr, float maxPercentIncrease = 0.5f){
+        int i = 0;
+        //iterate through every pixel and replace full transparent (a=0) with alphaReplacement
+        if (encodeProgressList){
+            DataTypes::increaseProgressPercent(*encodeProgressList,DataTypes::ADJUSTING_IMAGES,i + 1,frames.size(),maxPercentIncrease);
+            i++;
+        }
+    }
+
+    void resizeImages(const std::vector<cv::Mat>& frames, uint32_t width, uint32_t height, DataTypes::InterpolationModes interpolationMode = DataTypes::BILINEAR, std::vector<DataTypes::EncodingProgress>* encodeProgressList = nullptr, float maxPercentIncrease = 0.5f) {
         std::vector<cv::Mat> resizedFrames;
         resizedFrames.reserve(frames.size());
 
@@ -35,8 +44,8 @@ class ImageAdjuster{
             
             resizedFrames.push_back(resizedFrame);
 
-            if (onProgress){
-                onProgress((float)(i + 1) / frames.size(), "");
+            if (encodeProgressList){
+                DataTypes::increaseProgressPercent(*encodeProgressList,DataTypes::ADJUSTING_IMAGES,i + 1,frames.size(),maxPercentIncrease);
                 i++;
             }
                 

@@ -42,3 +42,5 @@ target_link_libraries(imgui_app
     ${COREVIDEO}
     ${OPENGL}
 )
+
+target_compile_definitions(imgui_app PRIVATE GL_SILENCE_DEPRECATION)

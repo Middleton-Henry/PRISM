@@ -19,10 +19,11 @@
 #include <vector>
 #include <locale>
 #include <sstream>
+#include <thread>
 
 #include "ImGuiFileDialog/ImGuiFileDialog.h"
 #include "image_processor.cpp"
-#include "types/DataTypes.cpp"
+#include "types/DataTypes.h"
 #include "Encoder.cpp"
 
 
@@ -85,7 +86,7 @@ int main(int argc, char* argv[])
     Encoder encoder;
     ImageProcessor imageProcessor;
     DataTypes::EncodingSettings cachedSettings; //most recent encoding settings; use for presenting relevant progress bars
-    bool opened = true;
+    std::vector<DataTypes::EncodingProgress> encodeProgressList = DataTypes::makeProgressTracker();
     std::map<std::string, std::string> selectedFiles;
     unsigned int width = 1080; //set to first image upon upload
     unsigned int height = 1920; //set to first image upon upload
@@ -137,9 +138,8 @@ int main(int argc, char* argv[])
     bool encodeDialogOpen = false;
     std::vector<cv::Mat> pendingEncodeFrames;
     DataTypes::EncodingSettings pendingEncodeSettings;
-    float encodeProgress = 0.0f;
-    std::string encodeStage = "";
     bool isEncoding = false;
+    bool encodingFinished = false;
 
     
 
@@ -160,7 +160,7 @@ int main(int argc, char* argv[])
         ImGui::NewFrame();
 
         // ── UI Graphics Loop ──────────────────────────
-
+        previewUsedThisFrame = false;
         ImVec2 screenSize = ImGui::GetIO().DisplaySize;
         
 
@@ -437,21 +437,16 @@ int main(int argc, char* argv[])
                         frames.push_back(img);
 
                     isEncoding     = true;
-                    encodeProgress = 0.0f;
-                    encodeStage    = "Starting...";
-
-                    std::filesystem::path exportFilePath = exportFolderPath / "output.myv";
-                    encoder.Encode(
-                        frames,
-                        cachedSettings,//copy settings so that they cannot be changed during encoding
-                        exportFilePath,
-                        [&](float progress, std::string stage) {
-                            encodeProgress = progress;
-                            encodeStage    = stage;
-                        }
-                    );
-
-                    isEncoding = false;
+                    std::thread([&, frames, cachedSettings, exportFolderPath]() mutable {
+                        encoder.Encode(
+                            frames,
+                            cachedSettings,
+                            exportFolderPath,
+                            &encodeProgressList
+                        );
+                        isEncoding = false;
+                        encodingFinished = true;
+                    }).detach();
                 }
                 ImGui::EndDisabled();
 
@@ -468,11 +463,7 @@ int main(int argc, char* argv[])
                     ImGui::EndTooltip();
                 }
 
-                if (isEncoding) {
-                    ImGui::Spacing();
-                    ImGui::ProgressBar(encodeProgress, ImVec2(-1.0f, 0.0f));
-                    ImGui::Text("%s", encodeStage.c_str());
-                }
+                
             }
         }
         ImGui::End();
@@ -668,7 +659,7 @@ int main(int argc, char* argv[])
         }
 
         if (!selectedFiles.empty()) {
-            ImGui::SetNextWindowSize(ImVec2(screenSize.x*(1.0f/6.0f), screenSize.y*(1.0f/3.0f)), ImGuiCond_Once);
+            ImGui::SetNextWindowSize(ImVec2(screenSize.x*(1.0f/6.0f), screenSize.y*(1.0f/5.0f)), ImGuiCond_Once);
             ImGui::SetNextWindowPos(ImVec2(screenSize.x*(5.0f/6.0f), 0), ImGuiCond_Once);
             if (ImGui::Begin("Image Sequence Properties")) { 
                 //for summary information and viewing options
@@ -695,6 +686,82 @@ int main(int argc, char* argv[])
 
             ImGui::End();
         }
+
+        if(isEncoding || encodingFinished){
+            ImGui::SetNextWindowSize(ImVec2(screenSize.x*(1.0f/6.0f), screenSize.y*(4.0f/5.0f)), ImGuiCond_Once);
+            ImGui::SetNextWindowPos(ImVec2(screenSize.x*(5.0f/6.0f), screenSize.y*(1.0f/5.0f)), ImGuiCond_Once);
+            if (ImGui::Begin("Encoding Progress")) {
+
+                // Overall progress bar
+                float totalProgress = DataTypes::getTotalProgress(encodeProgressList);
+                ImGui::Text("Overall");
+                ImGui::SameLine();
+                ImGui::ProgressBar(totalProgress, ImVec2(-1.0f, 0.0f));
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+
+                // Per-step progress bars
+                for (const auto& entry : encodeProgressList) {
+                    const char* stepName = DataTypes::stepToString(entry.EncodingPipelineStep);
+
+                    // State badge color
+                    ImVec4 stateColor;
+                    const char* stateLabel;
+                    switch (entry.state) {
+                        case DataTypes::NOT_STARTED:
+                            stateColor = ImVec4(0.5f, 0.5f, 0.5f, 1.0f);
+                            stateLabel = "[   ]";
+                            break;
+                        case DataTypes::IN_PROGRESS:
+                            stateColor = ImVec4(1.0f, 0.75f, 0.0f, 1.0f);
+                            stateLabel = "[ > ]";
+                            break;
+                        case DataTypes::FINISHED:
+                            stateColor = ImVec4(0.2f, 0.8f, 0.3f, 1.0f);
+                            stateLabel = "[ + ]";
+                            break;
+                        case DataTypes::SKIPPED:
+                            stateColor = ImVec4(0.5f, 0.5f, 0.5f, 0.6f);
+                            stateLabel = "[ - ]";
+                            break;
+                        default:
+                            stateColor = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+                            stateLabel = "[   ]";
+                    }
+
+                    ImGui::TextColored(stateColor, "%s", stateLabel);
+                    ImGui::SameLine();
+                    ImGui::Text("%s", stepName);
+                    float barHeight = 14.0f;
+
+                    // Show progress bar for active or finished steps; greyed out otherwise
+                    float displayProgress = entry.percentFinished;
+                    if (entry.state == DataTypes::SKIPPED) {
+                        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.4f, 0.4f, 0.4f, 0.4f));
+                        ImGui::ProgressBar(0.0f, ImVec2(-1.0f, barHeight), "Skipped");
+                        ImGui::PopStyleColor();
+                    } else if (entry.state == DataTypes::NOT_STARTED) {
+                        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.3f, 0.3f, 0.3f, 0.3f));
+                        ImGui::ProgressBar(0.0f, ImVec2(-1.0f, barHeight), "");
+                        ImGui::PopStyleColor();
+                    } else if (entry.state == DataTypes::FINISHED) {
+                        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.2f, 0.75f, 0.3f, 1.0f));
+                        ImGui::ProgressBar(1.0f, ImVec2(-1.0f, barHeight), "");
+                        ImGui::PopStyleColor();
+                    } else {
+                        // IN_PROGRESS — amber/yellow
+                        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.9f, 0.65f, 0.0f, 1.0f));
+                        ImGui::ProgressBar(displayProgress, ImVec2(-1.0f, barHeight), "");
+                        ImGui::PopStyleColor();
+                    }
+
+                    ImGui::Spacing();
+                }
+            }
+        ImGui::End();
+    }
+        
 
         // ── File dialog ───────────────────────────────────────────────────────
         if (ImGuiFileDialog::Instance()->Display("ExportFileDlg")) {
@@ -739,6 +806,8 @@ int main(int argc, char* argv[])
             hoveredTex = 0;
             hoveredIndex = -1;
         }
+
+        
         
         // ───────────────────────────────────────────────────────────────────
 
